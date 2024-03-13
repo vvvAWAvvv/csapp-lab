@@ -239,7 +239,7 @@ int isLessOrEqual(int x, int y)
     int m = 1 << 31;
     int revM = ~m;
     // 前负后正必为真
-    int negXposY = ((m & x) & (~y)) >> 31; // 全0或全1
+    int negXposY = ((m & x) & (~y)) >> 31; // all zero or all one
     // 前正后负必为假
     int negYposX = ((m & y) & (~x)) >> 31; // 全0或全1
     int negY = (~(revM & y) + 1);          // 去除符号位进行加减，由于符号相同因此只需比较其后的位大小即为相对大小
@@ -310,7 +310,7 @@ unsigned floatScale2(unsigned uf)
     if (exp == 0xff)
         return uf;
     else if (exp == (0xff - 1))
-        return sign | ((exp + 1) << 23); // 返回无穷大
+        return sign | ((exp + 1) << 23); // inf
     else if (exp == 0)
         return sign | (frac << 1);
     else
@@ -335,7 +335,6 @@ int floatFloat2Int(unsigned uf)
     int exp = (((1u << 31) - (1u << 23)) & uf) >> 23;
     int bias = 127;
     int frac = (((1 << 23) - 1) & uf) + (1 << 23);
-    // printf("%x sign:%d exp:%d frac:%d\n", uf, sign, exp, frac);
     if (uf & (1 << 31))
     {
         sign = -1;
@@ -357,7 +356,7 @@ int floatFloat2Int(unsigned uf)
     {
         return (frac >> (bias + 23 - exp)) * sign;
     }
-    else // 小于1
+    else // less than 1
     {
         return 0;
     }
