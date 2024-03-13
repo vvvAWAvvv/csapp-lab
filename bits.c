@@ -237,12 +237,10 @@ int conditional(int x, int y, int z)
 int isLessOrEqual(int x, int y)
 {
     int m = 1 << 31;
-    // 前负后正必为真
-    int negXposY = ((m & x) & (~y)) >> 31; // 全0或全1
-    // 前正后负必为假
-    int negYposX = ((m & y) & (~x)) >> 31; // 全0或全1
-    int negY = (~y + 1);                   // 去除符号位进行加减，由于符号相同因此只需比较其后的位大小即为相对大小
-    int less = (x + negY) >> 31;           // 全0或全1
+    int negXposY = ((m & x) & (~y)) >> 31;
+    int negYposX = ((m & y) & (~x)) >> 31;
+    int negY = (~y + 1);
+    int less = (x + negY) >> 31;
     int equal = !(x ^ y);
     return (!negYposX) & (negXposY | less | equal);
 }
@@ -304,7 +302,6 @@ unsigned floatScale2(unsigned uf)
     int exp = ((1u << 31) - (1u << 23)) & uf;
     int frac = ((1 << 23) - 1) & uf;
     exp = exp >> 23;
-    // printf("Give:%u %x sign:%d exp:%d %x frac:%d\n", uf, uf, sign, exp, exp, frac);
 
     if (exp == 0xff)
         return uf;
