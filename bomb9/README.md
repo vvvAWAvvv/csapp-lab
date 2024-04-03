@@ -455,7 +455,7 @@ Dump of assembler code for function phase_defused:
 ```
 我们知道这个输入的字符串需要与`rsi`指向的字符串相同，由上面的hexdump信息可知字符串为`"DrEvil"`，因此我们需要把phase4修改为`4 2 DrEvil`以进入`secret_phase`.
 由`secret_phase`的开头代码
-```
+``` asm
 ......
     15a2:	53                   	push   %rbx
     15a3:	e8 29 04 00 00       	callq  19d1 <read_line>
@@ -470,7 +470,7 @@ Dump of assembler code for function phase_defused:
 ......
 ```
 可知此处要求我们输入一个在`0x0~0x3e8`范围内的十进制数字。随后将该数字作为参数传递给`fun7`
-```
+``` asm
 ......
     15c9:	48 8d 3d 80 2b 20 00 	lea    0x202b80(%rip),%rdi        # 204150 <n1>
     15d0:	e8 8e ff ff ff       	callq  1563 <fun7>
