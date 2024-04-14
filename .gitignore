@@ -1,0 +1,12 @@
+#  binary file
+*.o
+*.tar
+*.out
+*.raw
+*.hexdump
+
+# target file
+target3/ctarget
+target3/rtarget
+target3/hex2raw
+
