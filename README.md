@@ -1,4 +1,6 @@
 # Cachelab 思路
+
+## PART A
 该程序可以模拟高速缓存，读取`valgrind`的`lackey`工具的输出，模拟内存的`load`，`store`和`modify`等操作，复现其缓存命中/不命中等事件。
 
 ### 数据结构解释
@@ -213,3 +215,257 @@ void accessCache(unsigned long long tag, unsigned long long setIndex)
 最后我们打印结果。
 附结果截图
 ![结果截图](./result.png)
+
+## PART B
+
+该部分要求我们优化一个矩阵转置的函数，使得cache的miss次数尽可能的低，其中cache的规格为32个组，每组一个cache block，每个cache block的大小为32 bytes。要求如下：
+
+* $32\times32 : miss \lt 300$
+* $64\times64 : miss \lt 1300$
+* $61\times67 : miss \lt 2000$
+
+## $32\times32$
+我们首先分析一下cache和内存的对应关系，一个`int`类型的大小为4 bytes，而一个cache line可以存储32 bytes的数据，因此一个cache line最多可以存储8个`int`元素。即，cache line与内存的对应关系大致如下：
+
+|   |0-7|8-15|16-23|24-31|
+|---|:---:|:---:|:---:|:---:
+|0|0|1|2|3|
+|1|4|5|6|7|
+|...|...|...|...|...|
+|7|28|29|30|31|
+|...|...|...|...|...|
+
+行和列分别表示行索引和列索引，由于刚好有32个cache line，因此我们可以将矩阵切分为$8\times8$的小块，这样就能保证同一个分块全部位于cache中，降低miss次数。
+
+同时根据writeup中的提示，我们可以创建至多12个局部变量，这些变量存于寄存器中，不会造成cache miss，利用这些局部变量，我们可以将cache line中的数据一次性全部读入，避免A矩阵和B矩阵之间反复load和store造成的大量miss。
+``` c
+#define BLOCK_SIZE_1 8
+tmp0 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1];
+tmp1 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 1];
+tmp2 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 2];
+tmp3 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 3];
+tmp4 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 4];
+tmp5 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 5];
+tmp6 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 6];
+tmp7 = A[i * BLOCK_SIZ1+i_offset][j * BLOCK_SIZE_1 + 7];
+```
+这样，以临时变量作为中转站，很大程度上减少了由于读取A而造成的cache miss。
+全部代码如下：
+``` c
+#define BLOCK_SIZE_1 8
+if (M == 32 && N == 32)
+{
+    for (i = 0; i < N / BLOCK_SIZE_1; ++i)
+    {
+        for (j = 0; j < M / BLOCK_SIZE_1; ++j)
+        {
+            for (i_offset = 0; i_offset < BLOCK_SIZE_1; ++i_offset)
+            {
+                tmp0 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1];
+                tmp1 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 1];
+                tmp2 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 2];
+                tmp3 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 3];
+                tmp4 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 4];
+                tmp5 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 5];
+                tmp6 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 6];
+                tmp7 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 7];
+                B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + i_offset] = tmp0;
+                B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + i_offset] = tmp1;
+                B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + i_offset] = tmp2;
+                B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + i_offset] = tmp3;
+                B[j * BLOCK_SIZE_1 + 4][i * BLOCK_SIZE_1 + i_offset] = tmp4;
+                B[j * BLOCK_SIZE_1 + 5][i * BLOCK_SIZE_1 + i_offset] = tmp5;
+                B[j * BLOCK_SIZE_1 + 6][i * BLOCK_SIZE_1 + i_offset] = tmp6;
+                B[j * BLOCK_SIZE_1 + 7][i * BLOCK_SIZE_1 + i_offset] = tmp7;
+            }
+        }
+    }
+}
+```
+最终得出的miss数量为288次，其中理论最优miss数量为$4\times4\times16+3=259$其中+3为传参导致的固定开销，比259部分多出来的部分主要是由于读取A的行和将要写入B的行恰好映射到同一个cacheline导致的。
+
+## $64\times64$
+类似于上一种情况，我们可以将该矩阵分块，但是注意到cache于内存的对应关系已经变为：
+
+|   |0-7|8-15|16-23|24-31|...|
+|---|:---:|:---:|:---:|:---:|:---:|
+|0|0|1|2|3|...|
+|1|8|9|10|11|...|
+|...|...|...|...|...|...|
+|4|0|1|2|3|...|
+|...|...|...|...|...|...|
+
+也就是说，如果我们像之前一样进行8*8的分块的话，在读取到第五行时就会发生cache的冲突，这样就会导致cache的miss次数升高。因此我们尝试使用$4\times4$的分块。然而这样又导致每一个cache line最后的4个元素没有被利用到，导致cache的利用率下降，使得miss次数较高（经测试为1700次左右），因此我们仍然使用$8\times8$的分块，再将其分为4个部分，在复制时进行一些特殊的操作来降低miss次数。
+
+要使总的miss次数下降至1300以下，我们需要使平均每个分块的miss数下降至$1300\div64\approx20$次，我们可以采取如下操作：
+
+$$
+A_{i,j}=
+\left(
+\begin{matrix}
+A_{11}&A_{12} \\
+A_{21}&A_{22} 
+\end{matrix}
+\right)
+$$
+$$
+B_{j,i}=
+\left(
+\begin{matrix}
+B_{11}&B_{12} \\
+B_{21}&B_{22}
+\end{matrix}
+\right)
+$$
+
+首先，我们将矩阵$A_{i,j},B_{j,i}$分成4个$4\times4$的块，先将$A_{11},A_{12}$分别复制到$B_{11},B_{12}$矩阵，这样会造成8次miss，然后我们在B上原址转置$B_{11},B_{12}$矩阵，这样B矩阵变为：
+
+$$
+B_{j,i}=
+\left(
+\begin{matrix}
+A_{11}^T&A_{12}^T \\
+B_{21}&B_{22}
+\end{matrix}
+\right)
+$$
+
+由于：
+$$
+A_{i,j}^T=
+\left(
+\begin{matrix}
+A_{11}^T&A_{21}^T \\
+A_{12}^T&A_{22}^T 
+\end{matrix}
+\right)
+$$
+
+因此我们还需要将$A_{12}^T$移动到$B_{21}$的位置，我们将进行如下操作：首先将$A_{21}$按列复制到`tmp0~tmp3`，将$A_{12}^T$对应的行复制到`tmp4~tmp7`，将`tmp4~tmp7`复制到$B_{21}$的对应位置，`tmp0~tmp3`复制到$A_{12}^T$的对应位置。在对角线($i=j$)的情形下，将会造成$7+3+3+3=16$次不命中，而在一般情形下，只会造成$4+1+1+1+1=8$次不命中，最后对于$B_{22}$使用常规方法转置，在对角线情况下产生$4+4=8$次不命中，而在一般情况下，由于$A_{22}$和$B_{22}$都已经存在于cache中，因而不会产生不命中，综合下来的总不命中次数测试为$1156$。
+
+代码如下：
+```c
+else if (M == 64 && N == 64)
+{
+    for (i = 0; i < N / BLOCK_SIZE_1; ++i)
+    {
+        for (j = 0; j < M / BLOCK_SIZE_1; ++j)
+        {
+            for (i_offset = 0; i_offset < 4; ++i_offset)
+            {
+                tmp0 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1];
+                tmp1 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 1];
+                tmp2 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 2];
+                tmp3 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 3];
+                tmp4 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 4];
+                tmp5 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 5];
+                tmp6 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 6];
+                tmp7 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 7];
+                // pre store
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1] = tmp0;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 1] = tmp1;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 2] = tmp2;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 3] = tmp3;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 4] = tmp4;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 5] = tmp5;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 6] = tmp6;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 7] = tmp7;
+            }
+            // Transform
+            tmp0 = B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 1];
+            tmp1 = B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 2];
+            tmp2 = B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 3];
+            tmp3 = B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 2];
+            tmp4 = B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 3];
+            tmp5 = B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 3];
+            B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 1] = B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1];
+            B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 2] = B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1];
+            B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 3] = B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1];
+            B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 2] = B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 1];
+            B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 3] = B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 1];
+            B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 3] = B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 2];
+            B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1] = tmp0;
+            B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1] = tmp1;
+            B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1] = tmp2;
+            B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 1] = tmp3;
+            B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 1] = tmp4;
+            B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 2] = tmp5;
+            tmp0 = B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 5];
+            tmp1 = B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 6];
+            tmp2 = B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 7];
+            tmp3 = B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 6];
+            tmp4 = B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 7];
+            tmp5 = B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 7];
+            B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 5] = B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 4];
+            B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 6] = B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 4];
+            B[j * BLOCK_SIZE_1][i * BLOCK_SIZE_1 + 7] = B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 4];
+            B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 6] = B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 5];
+            B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 7] = B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 5];
+            B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 7] = B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 6];
+            B[j * BLOCK_SIZE_1 + 1][i * BLOCK_SIZE_1 + 4] = tmp0;
+            B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 4] = tmp1;
+            B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 4] = tmp2;
+            B[j * BLOCK_SIZE_1 + 2][i * BLOCK_SIZE_1 + 5] = tmp3;
+            B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 5] = tmp4;
+            B[j * BLOCK_SIZE_1 + 3][i * BLOCK_SIZE_1 + 6] = tmp5;
+            for (i_offset = 0; i_offset < 4; ++i_offset)
+            {
+                tmp0 = A[i * BLOCK_SIZE_1 + 4][j * BLOCK_SIZE_1 + i_offset];
+                tmp1 = A[i * BLOCK_SIZE_1 + 5][j * BLOCK_SIZE_1 + i_offset];
+                tmp2 = A[i * BLOCK_SIZE_1 + 6][j * BLOCK_SIZE_1 + i_offset];
+                tmp3 = A[i * BLOCK_SIZE_1 + 7][j * BLOCK_SIZE_1 + i_offset];
+                tmp4 = B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 4];
+                tmp5 = B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 5];
+                tmp6 = B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 6];
+                tmp7 = B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 7];
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 4] = tmp0;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 5] = tmp1;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 6] = tmp2;
+                B[j * BLOCK_SIZE_1 + i_offset][i * BLOCK_SIZE_1 + 7] = tmp3;
+                B[j * BLOCK_SIZE_1 + i_offset + 4][i * BLOCK_SIZE_1] = tmp4;
+                B[j * BLOCK_SIZE_1 + i_offset + 4][i * BLOCK_SIZE_1 + 1] = tmp5;
+                B[j * BLOCK_SIZE_1 + i_offset + 4][i * BLOCK_SIZE_1 + 2] = tmp6;
+                B[j * BLOCK_SIZE_1 + i_offset + 4][i * BLOCK_SIZE_1 + 3] = tmp7;
+            }
+            for (; i_offset < BLOCK_SIZE_1; ++i_offset)
+            {
+                tmp0 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 4];
+                tmp1 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 5];
+                tmp2 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 6];
+                tmp3 = A[i * BLOCK_SIZE_1 + i_offset][j * BLOCK_SIZE_1 + 7];
+                B[j * BLOCK_SIZE_1 + 4][i * BLOCK_SIZE_1 + i_offset] = tmp0;
+                B[j * BLOCK_SIZE_1 + 5][i * BLOCK_SIZE_1 + i_offset] = tmp1;
+                B[j * BLOCK_SIZE_1 + 6][i * BLOCK_SIZE_1 + i_offset] = tmp2;
+                B[j * BLOCK_SIZE_1 + 7][i * BLOCK_SIZE_1 + i_offset] = tmp3;
+            }
+        }
+    }
+}
+```
+
+## $61\times67$
+由于该大小的矩阵无法与cacheline建立简明的对应关系，因此我们通过测试不同的分块大小，测试出哪一种分块可以满足题目的要求，经测试$16\times16$的分块可以满足题目的要求。
+
+代码如下：
+```c
+else // if(M==61&&N==67)
+{
+    // Process 64 x 48
+    for (i = 0; i < N / BLOCK_SIZE_2 + 1; ++i)
+    {
+        for (j = 0; j < M / BLOCK_SIZE_2 + 1; ++j)
+        {
+            for (i_offset = 0; i_offset < BLOCK_SIZE_2 && i_offset + BLOCK_SIZE_2 * i < N; ++i_offset)
+            {
+                for (tmp0 = 0; tmp0 < BLOCK_SIZE_2 && tmp0 + BLOCK_SIZE_2 * j < M; ++tmp0)
+                {
+                    B[BLOCK_SIZE_2 * j + tmp0][BLOCK_SIZE_2 * i + i_offset] = A[BLOCK_SIZE_2 * i + i_offset][BLOCK_SIZE_2 * j + tmp0];
+                }
+            }
+        }
+    }
+}
+```
+
+结果如图：
+![result](./screenshot-1.png)
