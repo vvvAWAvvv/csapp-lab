@@ -185,7 +185,6 @@ int mm_init(void)
  */
 void *mm_malloc(size_t size)
 {
-    // fprintf(stderr, "Heapsize: %d\n", mem_heapsize());
     size_t total_size = ALIGN(size);
     void *block = first_available(total_size);
     return (void *)((char *)block + ALIGNMENT);
@@ -205,6 +204,10 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
+    if (ptr == NULL)
+    {
+        return mm_malloc(size);
+    }
     if (size == 0)
     {
         mm_free(ptr);
