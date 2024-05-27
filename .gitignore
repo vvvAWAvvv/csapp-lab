@@ -2,3 +2,4 @@
 *.o
 mdrive
 *.rep
+/.vscode
