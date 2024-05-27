@@ -486,5 +486,19 @@ void *mm_realloc(void *ptr, size_t size)
 
 ![result0527](./result0527.png)
 
+**突然发现不可以定义全局数组，所以我们用`void **`代替**
+``` c
+void **mem_pool_head;
+int mm_init(void)
+{
+    mem_pool_head = mem_heap_lo();
+    mem_sbrk(ALIGN(MAX_SLOT * sizeof(void *)));
+    for (int i = 0; i < MAX_SLOT; ++i)
+    {
+        mem_pool_head[i] = NULL;
+    }
+    return 0;
+}
+```
 
 終わり

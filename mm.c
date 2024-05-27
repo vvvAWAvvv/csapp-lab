@@ -69,7 +69,7 @@ void *foot_pointer(void *block)
 
 #define FOOT_FLAG_BYTE(block) *((size_t *)foot_pointer(block) - 1)
 
-void *mem_pool_head[MAX_SLOT];
+void **mem_pool_head;
 
 //  0     1     2      3      4       5       6          7        8         9         10
 // 0~15 16~31 32~63 64~127 128~255 256~511 512~1023 1024~2047 2048~4095 4096~8191 8192~inf
@@ -172,6 +172,8 @@ int check_available(void *block)
 
 int mm_init(void)
 {
+    mem_pool_head = mem_heap_lo();
+    mem_sbrk(ALIGN(MAX_SLOT * sizeof(void *)));
     for (int i = 0; i < MAX_SLOT; ++i)
     {
         mem_pool_head[i] = NULL;
@@ -313,7 +315,7 @@ void coalesce(void *block)
 {
     assert(!check_available(block));
     // edge
-    void *lo = (void *)mem_heap_lo();
+    void *lo = (void *)((char *)mem_heap_lo() + ALIGN(sizeof(void *) * MAX_SLOT));
     void *hi = (void *)mem_heap_hi();
 
     // Compute the two physically adjacent block in the memory and check if they are available
