@@ -456,4 +456,35 @@ void *mm_realloc(void *ptr, size_t size)
 
 当前结果为88分，注意到利用率仍然有提升空间。
 
+## Changelog 0527
+
+首先修改了`coalesce`函数的小bug：将`<` `>`改为`<=` `>=`：
+
+``` c
+//...
+    int valid_prev = (adjacent_prev >= lo) && check_available(adjacent_prev);
+    int valid_next = (adjacent_next <= hi) && check_available(adjacent_next);
+//...
+```
+
+然后在`mm_realloc`函数中针对用例进行优化：
+
+``` c
+//...
+        // Special case: top block
+        if (adjacent_next == (void *)((char *)mem_heap_hi() + 1))
+        {
+            mem_sbrk(size - block_size);
+            set_block_size(block, size);
+            return ptr;
+        }
+//...
+```
+
+如果需要重分配的块位于堆顶，那么直接扩展堆即可。
+这样分数达到了92分
+
+![result0527](./result0527.png)
+
+
 終わり

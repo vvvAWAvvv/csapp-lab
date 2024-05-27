@@ -221,7 +221,7 @@ void *mm_realloc(void *ptr, size_t size)
     void *adjacent_next = (void *)((char *)block + 2 * ALIGNMENT + block_size);
 
     // Try to combine current block with its adjacent_next
-    if (adjacent_next < mem_heap_hi() && check_available(adjacent_next))
+    if (adjacent_next <= mem_heap_hi() && check_available(adjacent_next))
     {
         detach(adjacent_next);
         block_size += get_block_size(adjacent_next) + 2 * ALIGNMENT;
@@ -239,6 +239,13 @@ void *mm_realloc(void *ptr, size_t size)
     }
     else if (size > block_size)
     {
+        // Special case: top block
+        if (adjacent_next == (void *)((char *)mem_heap_hi() + 1))
+        {
+            mem_sbrk(size - block_size);
+            set_block_size(block, size);
+            return ptr;
+        }
         newptr = mm_malloc(size);
         memcpy(newptr, ptr, copy_size);
         mm_free(ptr);
@@ -315,8 +322,8 @@ void coalesce(void *block)
     size_t prev_size = *(size_t *)((char *)block - ALIGNMENT) & SIZE_MASK;
     void *adjacent_prev = (void *)((char *)block - prev_size - 2 * ALIGNMENT);
     // assert(prev_size == get_block_size(adjacent_prev));
-    int valid_prev = (adjacent_prev > lo) && check_available(adjacent_prev);
-    int valid_next = (adjacent_next < hi) && check_available(adjacent_next);
+    int valid_prev = (adjacent_prev >= lo) && check_available(adjacent_prev);
+    int valid_next = (adjacent_next <= hi) && check_available(adjacent_next);
 
     if (!valid_prev && !valid_next)
     {
@@ -385,22 +392,6 @@ void *first_available(size_t size)
  */
 void *extend_heap(size_t size)
 {
-    // Firstly, try to extend the top block if available
-    // void *hi = mem_heap_hi();
-    // void *lo = mem_heap_lo();
-    // if ((void *)((size_t *)hi - 2) > lo)
-    // {
-    //     size_t hi_size = *(size_t *)((char *)hi + 1 - ALIGNMENT);
-    //     void *hi_block = (void *)((char *)hi - 2 * ALIGNMENT - hi_size + 1);
-    //     if (hi_block > lo && check_available(hi_block))
-    //     {
-    //         printf("Here!\n");
-    //         detach(hi_block);
-    //         mem_sbrk(size - hi_size);
-    //         set_block_size(hi_block, size);
-    //         return hi_block;
-    //     }
-    // }
     void *block = mem_sbrk(size + 2 * ALIGNMENT);
     set_block_size(block, size);
     return block;
